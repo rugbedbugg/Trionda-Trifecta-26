@@ -1,0 +1,6 @@
+pandas>=2.0
+numpy>=1.24
+scikit-learn>=1.3
+# Optional — only needed for the FBref enrichment step (src/wcpredictor/enrich.py).
+# The pipeline degrades gracefully to squad caps/goals/market value if it is absent.
+soccerdata>=1.6

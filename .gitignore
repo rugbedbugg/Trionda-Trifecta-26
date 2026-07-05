@@ -1,0 +1,12 @@
+# Generated artifacts — rebuilt by `python -m wcpredictor.pipeline`
+data/
+outputs/
+
+# External datasets are not vendored (see README → Setup)
+#   ../worldcup, ../FIFA-World-Cup-2026-Dataset, data/international_results.csv
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
