@@ -71,8 +71,11 @@ def continue_tournament(b: dict | None = None):
             h_real = a_real = True
         else:
             n = ko[mid]
-            # Scheduled quarter-finals still list their real participants directly.
-            if row["status"] != "Completed" and str(row.get("home_team_id")) not in ("", "nan") \
+            # Real participants may be listed directly on the row — scheduled
+            # quarter-finals always are, and completed ones keep them too. Use
+            # them whenever present so we never depend on an upstream feeder
+            # whose winner the dataset failed to record.
+            if str(row.get("home_team_id")) not in ("", "nan") \
                     and not _isnan(row.get("home_team_id")):
                 h, a = int(row["home_team_id"]), int(row["away_team_id"])
                 h_real = a_real = True
@@ -81,7 +84,17 @@ def continue_tournament(b: dict | None = None):
         stage = (r32.get(mid) or ko.get(mid))["stage"]
 
         if row["status"] == "Completed":
-            winner = int(bracket.actual_advancer(row))
+            advancer = bracket.actual_advancer(row)
+            if advancer is None:
+                # Data gap: a completed knockout draw whose shootout was never
+                # recorded upstream. Keep the node but leave it unresolved —
+                # nothing downstream can be predicted from real data through
+                # this slot anyway.
+                node[mid] = {"match_id": mid, "home": h, "away": a, "stage": stage,
+                             "actual": True, "winner": None, "loser": None,
+                             "inputs_real": True}
+                continue
+            winner = int(advancer)
             node[mid] = {"match_id": mid, "home": h, "away": a, "stage": stage,
                          "actual": True, "winner": winner,
                          "loser": a if winner == h else h, "inputs_real": True}
@@ -122,6 +135,7 @@ def backtest(b: dict | None = None, warmup: int = WARMUP, show_ko: bool = True):
 
     tally = {"overall": [0, 0], "group": [0, 0], "ko_result": [0, 0], "ko_adv": [0, 0]}
     ko_rows = []
+    undecidable = []
     for i, (mid, row) in enumerate(completed):
         if i < warmup:
             continue
@@ -134,10 +148,16 @@ def backtest(b: dict | None = None, warmup: int = WARMUP, show_ko: bool = True):
         ko = row["stage_id"] != bracket.STAGE_GROUP
         tally["overall"][0] += pred_res == y; tally["overall"][1] += 1
         if ko:
+            true_adv = bracket.actual_advancer(row)
+            if true_adv is None:
+                # completed knockout match whose winner the data cannot
+                # determine (e.g. a draw with no recorded shootout) — skip it
+                # rather than crash; scoring advancer accuracy is impossible.
+                undecidable.append((meta[h]["name"], meta[a]["name"]))
+                continue
             tally["ko_result"][0] += pred_res == y; tally["ko_result"][1] += 1
             adv = h if (proba[0] + proba[1] / 2) >= 0.5 else a
-            true_adv = int(bracket.actual_advancer(row))
-            hit = adv == true_adv
+            hit = adv == int(true_adv)
             tally["ko_adv"][0] += hit; tally["ko_adv"][1] += 1
             ko_rows.append((meta[h]["name"], meta[a]["name"], int(row["home_score"]),
                             int(row["away_score"]), meta[true_adv]["name"], hit))
@@ -154,6 +174,11 @@ def backtest(b: dict | None = None, warmup: int = WARMUP, show_ko: bool = True):
                        ("Knockout advancer accuracy", "ko_adv")):
         hit, tot = tally[key]
         print(f" {label:<30}: {hit/tot:.1%}  ({hit}/{tot})")
+    if undecidable:
+        print(f"\n skipped {len(undecidable)} knockout match(es) with no determinable"
+              f" winner in the data (draw, shootout unrecorded):")
+        for h, a in undecidable:
+            print(f"   - {h} vs {a}")
     if show_ko and ko_rows:
         print("\n knockout ties (predicted advancer vs actual):")
         for h, a, hs, as_, adv, hit in ko_rows:
